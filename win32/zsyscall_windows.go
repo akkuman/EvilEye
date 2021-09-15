@@ -39,11 +39,21 @@ func errnoErr(e syscall.Errno) error {
 
 var (
 	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
+	modntdll    = windows.NewLazySystemDLL("ntdll.dll")
 
-	procOpenProcess       = modkernel32.NewProc("OpenProcess")
-	procReadProcessMemory = modkernel32.NewProc("ReadProcessMemory")
-	procVirtualQueryEx    = modkernel32.NewProc("VirtualQueryEx")
+	procIsWow64Process            = modkernel32.NewProc("IsWow64Process")
+	procOpenProcess               = modkernel32.NewProc("OpenProcess")
+	procReadProcessMemory         = modkernel32.NewProc("ReadProcessMemory")
+	procVirtualQueryEx            = modkernel32.NewProc("VirtualQueryEx")
+	procNtQueryInformationProcess = modntdll.NewProc("NtQueryInformationProcess")
+	procNtReadVirtualMemory       = modntdll.NewProc("NtReadVirtualMemory")
 )
+
+func _IsWow64Process(hProcess HANDLE, Wow64Process PBOOL) (ret BOOL) {
+	r0, _, _ := syscall.Syscall(procIsWow64Process.Addr(), 2, uintptr(hProcess), uintptr(Wow64Process), 0)
+	ret = BOOL(r0)
+	return
+}
 
 func OpenProcess(dwDesiredAccess DWORD, bInheritHandle BOOL, dwProcessId DWORD) (handle HANDLE) {
 	r0, _, _ := syscall.Syscall(procOpenProcess.Addr(), 3, uintptr(dwDesiredAccess), uintptr(bInheritHandle), uintptr(dwProcessId))
@@ -60,5 +70,17 @@ func _ReadProcessMemory(hProcess HANDLE, lpBaseAddress LPCVOID, lpBuffer LPVOID,
 func _VirtualQueryEx(hProcess HANDLE, lpAddress LPCVOID, lpBuffer uintptr, dwLength SIZE_T) (size SIZE_T) {
 	r0, _, _ := syscall.Syscall6(procVirtualQueryEx.Addr(), 4, uintptr(hProcess), uintptr(lpAddress), uintptr(lpBuffer), uintptr(dwLength), 0, 0)
 	size = SIZE_T(r0)
+	return
+}
+
+func _NtQueryInformationProcess(ProcessHandle HANDLE, ProcessInformationClass ProcessInfoClass, ProcessInformation LPVOID, ProcessInformationLength ULONG, ReturnLength PULONG) (status NTSTATUS) {
+	r0, _, _ := syscall.Syscall6(procNtQueryInformationProcess.Addr(), 5, uintptr(ProcessHandle), uintptr(ProcessInformationClass), uintptr(ProcessInformation), uintptr(ProcessInformationLength), uintptr(ReturnLength), 0)
+	status = NTSTATUS(r0)
+	return
+}
+
+func _NtReadVirtualMemory(hProcess HANDLE, BaseAddress PVOID, Buffer PVOID, BufferLength ULONG, ReturnLength PULONG) (status NTSTATUS) {
+	r0, _, _ := syscall.Syscall6(procNtReadVirtualMemory.Addr(), 5, uintptr(hProcess), uintptr(BaseAddress), uintptr(Buffer), uintptr(BufferLength), uintptr(ReturnLength), 0)
+	status = NTSTATUS(r0)
 	return
 }
