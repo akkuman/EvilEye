@@ -135,7 +135,7 @@ func FindEvil() (evilResults []EvilResult, err error) {
 	}
 	rule64 := "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 ?? 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 ?? ?? 00 00 00 00 00 00 02 00 00 00 00 00 00 00 ?? ?? ?? ?? 00 00 00 00 02 00 00 00 00 00 00 00 ?? ?? ?? ?? 00 00 00 00 01 00 00 00 00 00 00 00 ?? ?? 00 00 00 00 00 00"
 	rule32 := "00 00 00 00 00 00 00 00 01 00 00 00 ?? 00 00 00 01 00 00 00 ?? ?? 00 00 02 00 00 00 ?? ?? ?? ?? 02 00 00 00 ?? ?? ?? ?? 01 00 00 00 ?? ?? 00 00"
-	fmt.Printf("processes len %d\n", len(processes))
+	// fmt.Printf("debug: Number of processes: %d\n", len(processes))
 	for _, process := range processes {
 		// 如果是当前运行进程则跳过
 		if os.Getpid() == process.Pid() {
