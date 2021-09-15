@@ -68,6 +68,13 @@ func NewProcessScan(pid win32.DWORD) (processScan *ProcessScan, err error) {
 	return
 }
 
+func (p *ProcessScan) pointerSize() int {
+	if p.Is64Bit {
+		return 8
+	}
+	return 4
+}
+
 func (p *ProcessScan) initHeapsInfo() (err error) {
 	var numHeapsAddr uintptr
 	var heapArrayAddr uintptr
@@ -94,14 +101,38 @@ func (p *ProcessScan) initHeapsInfo() (err error) {
 	for idx := 0; uint32(idx) < p.NumberOfHeaps; idx++ {
 		var len_ int
 		var heap uintptr
-		if p.Is64Bit {
-			len_ = 8
-		} else {
-			len_ = 4
-		}
+		len_ = p.pointerSize()
 		heap, err = GetProcUintptr(p.Handle, p.ProcHeapsArrayAddr+uintptr(idx*len_), p.Is64Bit)
 		if err != nil {
 			return
+		}
+		// ref: https://github.com/CCob/BeaconEye/commit/808e594d7e0ec37d70c3dd7cca8dde8d31ae27b9#diff-3bf0890f572241d122dd631cf90b569bd1914ab2d1a709314ce7cbfe588dd8fcR64
+		// you can use `dt _heap` in windbg to view memory structure (https://0x43434343.github.io/win10_internal/)
+		isNTHeap, err := win32.IsNTHeap(p.Handle, heap)
+		if err != nil {
+			return err
+		}
+		if isNTHeap && p.Is64Bit {
+			segmentListEntryForward, err := GetProcUintptr(p.Handle, heap+uintptr(0x18), p.Is64Bit)
+			if err != nil {
+				return err
+			}
+			// fmt.Printf("ProcHeapsArrayAddr: %x addr: %x segmentListEntryForward = %x\n", heap, heap+uintptr(0x18), segmentListEntryForward)
+			segmentBaseAddress, err := GetProcUintptr(p.Handle, heap+uintptr(0x30), p.Is64Bit)
+			if err != nil {
+				return err
+			}
+			for !UintptrListContains(p.Heaps, segmentBaseAddress) {
+				p.Heaps = append(p.Heaps, segmentBaseAddress)
+				segmentListEntryForward, err = GetProcUintptr(p.Handle, segmentListEntryForward+uintptr(len_), p.Is64Bit)
+				if err != nil {
+					return err
+				}
+				segmentBaseAddress, err = GetProcUintptr(p.Handle, segmentListEntryForward+uintptr(0x30), p.Is64Bit)
+				if err != nil {
+					return err
+				}
+			}
 		}
 		p.Heaps = append(p.Heaps, heap)
 	}
@@ -116,11 +147,16 @@ func (p *ProcessScan) SearchMemory(matchStr string, pResultArray *[]MatchResult)
 	next := GetNext(matchArray)
 	for _, heap := range p.Heaps {
 		// fmt.Printf("debug: heap: %x\n", heap)
-		mbi, err := win32.VirtualQueryEx(p.Handle, win32.LPCVOID(heap))
+		memInfo, err := win32.QueryMemoryInfo(p.Handle, win32.LPCVOID(heap))
 		if err != nil {
 			break
 		}
-		if err = SearchMemoryBlock(p.Handle, matchArray, uint64(mbi.BaseAddress), int64(mbi.RegionSize), next, pResultArray); err != nil {
+		// fmt.Printf("debug: memInfo: %#v\n", memInfo)
+		if memInfo.NoAccess {
+			continue
+		}
+		// fmt.Printf("BaseAddress = %x RegionSize = %x\n", memInfo.BaseAddress, memInfo.RegionSize)
+		if err = SearchMemoryBlock(p.Handle, matchArray, uint64(memInfo.BaseAddress), int64(memInfo.RegionSize), next, pResultArray); err != nil {
 			return err
 		}
 	}
@@ -147,6 +183,7 @@ func FindEvil() (evilResults []EvilResult, err error) {
 			fmt.Printf("init process info error: %v\n", err)
 			continue
 		}
+		// fmt.Printf("debug: processScan: %#v\n", processScan)
 		rule := rule32
 		if processScan.Is64Bit {
 			rule = rule64
@@ -173,6 +210,7 @@ func SearchMemoryBlock(hProcess win32.HANDLE, matchArray []uint16, startAddr uin
 		err = fmt.Errorf("%v: %v", err, syscall.GetLastError())
 		return
 	}
+	// fmt.Printf("debug: memBuf = %x size = %x\n", len(memBuf), size)
 
 	// sunday algorithm implement
 	i := 0      // 父串index

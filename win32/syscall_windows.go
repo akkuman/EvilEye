@@ -51,8 +51,12 @@ var (
 
 	SizeOfProcessBasicInformation = unsafe.Sizeof(PROCESS_BASIC_INFORMATION{})
 
-	STATUS_PENDING      uint32 = 0x00000103
-	STATUS_PARTIAL_COPY uint32 = 0x8000000D
+	STATUS_PENDING      DWORD = 0x00000103
+	STATUS_PARTIAL_COPY DWORD = 0x8000000D
+
+	ExecuteReadWrite DWORD = 0x40
+	ExecuteRead      DWORD = 0x20
+	NoAccess         DWORD = 0x01
 )
 
 const PROCESS_ALL_ACCESS = DWORD(0x1F0FFF)
@@ -88,7 +92,7 @@ func ReadProcessMemoryOnce(hProcess HANDLE, lpBaseAddress LPCVOID, size int64) (
 func NtReadVirtualMemory(hProcess HANDLE, baseAddress PVOID, size int64) (buffer []byte, err error) {
 	buffer = make([]byte, size)
 	nSize := ULONG(size)
-	var NumberOfBytesRead uint = 0
+	NumberOfBytesRead := ULONG(0)
 	status := _NtReadVirtualMemory(
 		hProcess,
 		baseAddress,
@@ -98,8 +102,7 @@ func NtReadVirtualMemory(hProcess HANDLE, baseAddress PVOID, size int64) (buffer
 	)
 
 	if status < 0 {
-		fmt.Printf("NumberOfBytesRead: %#v\n", NumberOfBytesRead)
-		if uint32(status) != STATUS_PARTIAL_COPY {
+		if DWORD(status) != STATUS_PARTIAL_COPY {
 			return buffer, fmt.Errorf("call NtReadVirtualMemory error")
 		}
 		if NumberOfBytesRead != 0 {
