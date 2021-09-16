@@ -106,6 +106,7 @@ func (p *ProcessScan) initHeapsInfo() (err error) {
 		if err != nil {
 			return
 		}
+		// fmt.Printf("heap address: 0x%x\n", heap)
 		// ref: https://github.com/CCob/BeaconEye/commit/808e594d7e0ec37d70c3dd7cca8dde8d31ae27b9#diff-3bf0890f572241d122dd631cf90b569bd1914ab2d1a709314ce7cbfe588dd8fcR64
 		// you can use `dt _heap` in windbg to view memory structure (https://0x43434343.github.io/win10_internal/)
 		isNTHeap, err := win32.IsNTHeap(p.Handle, heap)
@@ -113,30 +114,139 @@ func (p *ProcessScan) initHeapsInfo() (err error) {
 			return err
 		}
 		if isNTHeap && p.Is64Bit {
-			segmentListEntryForward, err := GetProcUintptr(p.Handle, heap+uintptr(0x18), p.Is64Bit)
+			// Get Heap Entry Xor Key
+			xorKey, err := GetProcUint16(p.Handle, heap+uintptr(0x88))
 			if err != nil {
 				return err
 			}
-			// fmt.Printf("ProcHeapsArrayAddr: %x addr: %x segmentListEntryForward = %x\n", heap, heap+uintptr(0x18), segmentListEntryForward)
-			segmentBaseAddress, err := GetProcUintptr(p.Handle, heap+uintptr(0x30), p.Is64Bit)
+			// Get SegmentListEntry
+			// typedef struct _HEAP_ENTRY
+			// {
+			// 	UINT SubSegmentCode;
+			// 	USHORT PreviousSize;
+			// 	BYTE SegmentOffset;
+			// 	BYTE UnusedBytes;
+			// }HEAP_ENTRY;
+
+			// typedef struct _HEAP_SEGMENT
+
+			// {
+			// 	HEAP_ENTRY Entry;
+			// 	UINT   SegmentSignature;
+			// 	UINT   SegmentFlags;
+			// 	LIST_ENTRY SegmentListEntry; //各heap_segment通过此字段连接
+			// 	PHEAP Heap;                  //指向所属的heap
+			// 	//...省略若干字段
+			// 	LIST_ENTRY UCRSegmentList;
+			// }HEAP_SEGMENT;
+
+			// typedef struct _HEAP
+
+			// {
+			// 	HEAP_SEGMENT Segment;
+			// 	UINT   Flags;
+			// 	UINT   ForceFlags;
+			// 	//...省略若干字段
+			// 	LIST_ENTRY SegmentList;  //通过此字段找到各heap_segment,从0号段开始，自然首先同HEAP最开始处那个HEAP_SEGMENT的SegmentListEntry链接
+			// 	//...省略若干字段
+			// 	HEAP_TUNING_PARAMETERS TuningParameters;
+			// }*PHEAP, HEAP;
+			segmentListEntry, err := GetProcUintptr(p.Handle, heap+uintptr(0x18), p.Is64Bit)
 			if err != nil {
 				return err
 			}
-			for !UintptrListContains(p.Heaps, segmentBaseAddress) {
-				p.Heaps = append(p.Heaps, segmentBaseAddress)
-				segmentListEntryForward, err = GetProcUintptr(p.Handle, segmentListEntryForward+uintptr(len_), p.Is64Bit)
+			segmentListEntry -= 0x18
+			// Record LinkList
+			segmentEnd, err := GetProcUintptr(p.Handle, heap+uintptr(0x18+0x08), p.Is64Bit)
+			if err != nil {
+				return err
+			}
+			segmentEnd -= 0x18
+			p.AddHeap(segmentListEntry)
+			for {
+				v1, err := GetProcUintptr(p.Handle, segmentListEntry, p.Is64Bit)
 				if err != nil {
 					return err
 				}
-				segmentBaseAddress, err = GetProcUintptr(p.Handle, segmentListEntryForward+uintptr(0x30), p.Is64Bit)
+				v2, err := GetProcUintptr(p.Handle, segmentEnd, p.Is64Bit)
 				if err != nil {
 					return err
+				}
+				// fmt.Printf("segmentListEntry = 0x%x segmentEnd = 0x%x %v\n", segmentListEntry, segmentEnd, segmentListEntry == segmentEnd)
+				// fmt.Printf("v1 = %x v2 = %x\n", v1, v2)
+				if v1 == v2 {
+					break
+				}
+				if v1 == 0 {
+					break
+				}
+
+				segmentListEntry, err := GetProcUintptr(p.Handle, segmentListEntry+uintptr(0x18), p.Is64Bit)
+				if err != nil {
+					return err
+				}
+				segmentListEntry -= 0x18
+				// Calculate Heap Entry
+				isEntryNTHeap, err := win32.IsNTHeap(p.Handle, segmentListEntry)
+				if err != nil {
+					return err
+				}
+				if !isEntryNTHeap {
+					break
+				}
+				// Record Fisrt And End
+				firstHeapEntry, err := GetProcUintptr(p.Handle, segmentListEntry+uintptr(0x40), p.Is64Bit)
+				if err != nil {
+					return err
+				}
+				lastHeapEntry, err := GetProcUintptr(p.Handle, segmentListEntry+uintptr(0x48), p.Is64Bit)
+				if err != nil {
+					return err
+				}
+				// If FirstHeapEntry Is Not Null
+				if firstHeapEntry == 0 {
+					continue
+				}
+				firstHeapSize, err := GetProcUint16(p.Handle, firstHeapEntry+uintptr(0x08))
+				if err != nil {
+					return err
+				}
+				for firstHeapEntry <= lastHeapEntry {
+					// Decrypt Size
+					decryptSize := firstHeapSize ^ xorKey
+					if decryptSize == 0 {
+						break
+					}
+					// Get Unused Bytes
+					// unusedByteCount, err := GetProcByte(p.Handle, firstHeapEntry+uintptr(0x0f))
+					// if err != nil {
+					// 	return err
+					// }
+					// Get Next Entry
+					firstHeapEntry = firstHeapEntry + 0x10*uintptr(decryptSize)
+					p.AddHeap(firstHeapEntry)
+					firstHeapSize, err = GetProcUint16(p.Handle, firstHeapEntry+uintptr(0x08))
+					if err != nil {
+						return err
+					}
+				}
+				if segmentListEntry == segmentEnd {
+					break
 				}
 			}
 		}
-		p.Heaps = append(p.Heaps, heap)
+		p.AddHeap(heap)
 	}
 	return nil
+}
+
+func (p *ProcessScan) AddHeap(heap uintptr) bool {
+	if !UintptrListContains(p.Heaps, heap) {
+		// fmt.Printf("heapBock = 0x%x\n", heap)
+		p.Heaps = append(p.Heaps, heap)
+		return true
+	}
+	return false
 }
 
 func (p *ProcessScan) SearchMemory(matchStr string, pResultArray *[]MatchResult) (err error) {
@@ -175,6 +285,9 @@ func FindEvil() (evilResults []EvilResult, err error) {
 	for _, process := range processes {
 		// 如果是当前运行进程则跳过
 		if os.Getpid() == process.Pid() {
+			continue
+		}
+		if process.Pid() != 8104 {
 			continue
 		}
 		// fmt.Printf("debug: Start scan process %d:%s\n", process.Pid(), process.Executable())
@@ -320,6 +433,26 @@ func GetProcUint32(hProcess win32.HANDLE, addr uintptr) (num uint32, err error) 
 		return
 	}
 	num = binary.LittleEndian.Uint32(numBytes)
+	return
+}
+
+func GetProcUint16(hProcess win32.HANDLE, addr uintptr) (num uint16, err error) {
+	var numBytes []byte
+	numBytes, err = win32.NtReadVirtualMemory(hProcess, win32.PVOID(addr), 2)
+	if err != nil {
+		return
+	}
+	num = binary.LittleEndian.Uint16(numBytes)
+	return
+}
+
+func GetProcByte(hProcess win32.HANDLE, addr uintptr) (res byte, err error) {
+	var numBytes []byte
+	numBytes, err = win32.NtReadVirtualMemory(hProcess, win32.PVOID(addr), 1)
+	if err != nil {
+		return
+	}
+	res = numBytes[0]
 	return
 }
 
