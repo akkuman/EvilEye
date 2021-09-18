@@ -174,12 +174,10 @@ func (p *ProcessScan) initHeapsInfo() (err error) {
 		heapArrayAddr = pebBaseAddr + uintptr(0x90)
 	}
 	p.NumberOfHeaps, err = GetProcUint32(p.Handle, numHeapsAddr)
-	// fmt.Printf("debug: numHeaps: %x\n", p.NumberOfHeaps)
 	if err != nil {
 		return
 	}
 	p.ProcHeapsArrayAddr, err = GetProcUintptr(p.Handle, heapArrayAddr, p.Is64Bit)
-	// fmt.Printf("debug: heapArray: %x\n", p.ProcHeapsArrayAddr)
 	if err != nil {
 		return
 	}
@@ -190,7 +188,6 @@ func (p *ProcessScan) initHeapsInfo() (err error) {
 		if err != nil {
 			return
 		}
-		// fmt.Printf("heap address: 0x%x\n", heap)
 		// ref: https://github.com/CCob/BeaconEye/commit/808e594d7e0ec37d70c3dd7cca8dde8d31ae27b9#diff-3bf0890f572241d122dd631cf90b569bd1914ab2d1a709314ce7cbfe588dd8fcR64
 		// you can use `dt _heap` in windbg to view memory structure (https://0x43434343.github.io/win10_internal/)
 		isNTHeap, err := win32.IsNTHeap(p.Handle, heap)
@@ -311,13 +308,11 @@ func FindEvil() (evilResults []EvilResult, err error) {
 		if os.Getpid() == process.Pid() {
 			continue
 		}
-		// fmt.Printf("debug: Start scan process %d:%s\n", process.Pid(), process.Executable())
 		processScan, err := NewProcessScan(win32.DWORD(process.Pid()))
 		if err != nil {
 			fmt.Printf("init process info error: %v\n", err)
 			continue
 		}
-		// fmt.Printf("debug: processScan: %#v\n", processScan)
 		rule := rule32
 		if processScan.Is64Bit {
 			rule = rule64
@@ -344,7 +339,6 @@ func SearchMemoryBlock(hProcess win32.HANDLE, matchArray []uint16, startAddr uin
 		err = fmt.Errorf("%v: %v", err, syscall.GetLastError())
 		return
 	}
-	// fmt.Printf("debug: memBuf = %x size = %x\n", len(memBuf), size)
 
 	// sunday algorithm implement
 	i := 0      // 父串index
