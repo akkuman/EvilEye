@@ -26,6 +26,16 @@ type EvilResult struct {
 	Addr uint64
 }
 
+var SystemInfo win32.SystemInfo
+
+func init() {
+	var err error
+	SystemInfo, err = win32.GetNativeSystemInfo()
+	if err != nil {
+		panic(err)
+	}
+}
+
 type ProcessScan struct {
 	// the handle of the process
 	Handle win32.HANDLE
@@ -75,6 +85,66 @@ func (p *ProcessScan) pointerSize() int {
 	return 4
 }
 
+func (p *ProcessScan) getOffsetSegmentListEntry() (offset uintptr) {
+	return uintptr(0x18)
+}
+
+func (p *ProcessScan) getOffsetSegmentList() (offset uintptr) {
+	return uintptr(0x120)
+}
+
+func (p *ProcessScan) getAllHeapSegments(heap uintptr) (segs []uintptr, err error) {
+	var tmp []uintptr
+	segs = append(segs, heap)
+	offsetSegmentList := p.getOffsetSegmentList()
+	offsetSegmentListEntry := p.getOffsetSegmentListEntry()
+	segmentListEntryBlink := heap
+	for {
+		segmentListEntryBlink, err = GetProcUintptr(p.Handle, segmentListEntryBlink+offsetSegmentListEntry+uintptr(0x8), p.Is64Bit)
+		if err != nil {
+			return segs, err
+		}
+		if UintptrListContains(tmp, segmentListEntryBlink) {
+			break
+		}
+		tmp = append(tmp, segmentListEntryBlink)
+		segmentAddr := segmentListEntryBlink - p.getOffsetSegmentListEntry()
+		if segmentListEntryBlink != heap+offsetSegmentList &&
+			segmentListEntryBlink != heap+offsetSegmentListEntry &&
+			!UintptrListContains(segs, segmentListEntryBlink) {
+			segs = append(segs, segmentAddr)
+		}
+		segmentListEntryBlink = segmentAddr
+	}
+	return segs, nil
+}
+
+func (p *ProcessScan) getAllHeapBlocks(seg uintptr, xorkey uint16) (blocks []uintptr, err error) {
+	firstEntry, err := GetProcUintptr(p.Handle, seg+uintptr(0x40), p.Is64Bit)
+	if err != nil {
+		return blocks, err
+	}
+	lastValidEntry, err := GetProcUintptr(p.Handle, seg+uintptr(0x48), p.Is64Bit)
+	if err != nil {
+		return blocks, err
+	}
+	startAddr := firstEntry
+	for {
+		blocks = append(blocks, startAddr)
+		// get size of current block
+		size, err := GetProcUint16(p.Handle, startAddr+uintptr(0x08))
+		if err != nil {
+			return blocks, err
+		}
+		size = (size ^ xorkey) << 4
+		startAddr = startAddr + uintptr(size)
+		if startAddr > lastValidEntry {
+			break
+		}
+	}
+	return blocks, err
+}
+
 func (p *ProcessScan) initHeapsInfo() (err error) {
 	var numHeapsAddr uintptr
 	var heapArrayAddr uintptr
@@ -119,130 +189,39 @@ func (p *ProcessScan) initHeapsInfo() (err error) {
 			if err != nil {
 				return err
 			}
-			// Get SegmentListEntry
-			// typedef struct _HEAP_ENTRY
-			// {
-			// 	UINT SubSegmentCode;
-			// 	USHORT PreviousSize;
-			// 	BYTE SegmentOffset;
-			// 	BYTE UnusedBytes;
-			// }HEAP_ENTRY;
-
-			// typedef struct _HEAP_SEGMENT
-
-			// {
-			// 	HEAP_ENTRY Entry;
-			// 	UINT   SegmentSignature;
-			// 	UINT   SegmentFlags;
-			// 	LIST_ENTRY SegmentListEntry; //各heap_segment通过此字段连接
-			// 	PHEAP Heap;                  //指向所属的heap
-			// 	//...省略若干字段
-			// 	LIST_ENTRY UCRSegmentList;
-			// }HEAP_SEGMENT;
-
-			// typedef struct _HEAP
-
-			// {
-			// 	HEAP_SEGMENT Segment;
-			// 	UINT   Flags;
-			// 	UINT   ForceFlags;
-			// 	//...省略若干字段
-			// 	LIST_ENTRY SegmentList;  //通过此字段找到各heap_segment,从0号段开始，自然首先同HEAP最开始处那个HEAP_SEGMENT的SegmentListEntry链接
-			// 	//...省略若干字段
-			// 	HEAP_TUNING_PARAMETERS TuningParameters;
-			// }*PHEAP, HEAP;
-			segmentListEntry, err := GetProcUintptr(p.Handle, heap+uintptr(0x18), p.Is64Bit)
+			// get all heap segment from a heap
+			segs, err := p.getAllHeapSegments(heap)
 			if err != nil {
 				return err
 			}
-			segmentListEntry -= 0x18
-			// Record LinkList
-			segmentEnd, err := GetProcUintptr(p.Handle, heap+uintptr(0x18+0x08), p.Is64Bit)
-			if err != nil {
-				return err
-			}
-			segmentEnd -= 0x18
-			p.AddHeap(segmentListEntry)
-			for {
-				v1, err := GetProcUintptr(p.Handle, segmentListEntry, p.Is64Bit)
+			// get all block from a heap segment
+			for _, segment := range segs {
+				p.addHeapPageBase(segment)
+				blocks, err := p.getAllHeapBlocks(segment, xorKey)
 				if err != nil {
 					return err
 				}
-				v2, err := GetProcUintptr(p.Handle, segmentEnd, p.Is64Bit)
-				if err != nil {
-					return err
-				}
-				// fmt.Printf("segmentListEntry = 0x%x segmentEnd = 0x%x %v\n", segmentListEntry, segmentEnd, segmentListEntry == segmentEnd)
-				// fmt.Printf("v1 = %x v2 = %x\n", v1, v2)
-				if v1 == v2 {
-					break
-				}
-				if v1 == 0 {
-					break
-				}
-
-				segmentListEntry, err := GetProcUintptr(p.Handle, segmentListEntry+uintptr(0x18), p.Is64Bit)
-				if err != nil {
-					return err
-				}
-				segmentListEntry -= 0x18
-				// Calculate Heap Entry
-				isEntryNTHeap, err := win32.IsNTHeap(p.Handle, segmentListEntry)
-				if err != nil {
-					return err
-				}
-				if !isEntryNTHeap {
-					break
-				}
-				// Record Fisrt And End
-				firstHeapEntry, err := GetProcUintptr(p.Handle, segmentListEntry+uintptr(0x40), p.Is64Bit)
-				if err != nil {
-					return err
-				}
-				lastHeapEntry, err := GetProcUintptr(p.Handle, segmentListEntry+uintptr(0x48), p.Is64Bit)
-				if err != nil {
-					return err
-				}
-				// If FirstHeapEntry Is Not Null
-				if firstHeapEntry == 0 {
-					continue
-				}
-				firstHeapSize, err := GetProcUint16(p.Handle, firstHeapEntry+uintptr(0x08))
-				if err != nil {
-					return err
-				}
-				for firstHeapEntry <= lastHeapEntry {
-					// Decrypt Size
-					decryptSize := firstHeapSize ^ xorKey
-					if decryptSize == 0 {
-						break
-					}
-					// Get Unused Bytes
-					// unusedByteCount, err := GetProcByte(p.Handle, firstHeapEntry+uintptr(0x0f))
-					// if err != nil {
-					// 	return err
-					// }
-					// Get Next Entry
-					firstHeapEntry = firstHeapEntry + 0x10*uintptr(decryptSize)
-					p.AddHeap(firstHeapEntry)
-					firstHeapSize, err = GetProcUint16(p.Handle, firstHeapEntry+uintptr(0x08))
-					if err != nil {
-						return err
-					}
-				}
-				if segmentListEntry == segmentEnd {
-					break
+				for _, block := range blocks {
+					p.addHeapPageBase(block)
 				}
 			}
+		} else {
+			p.addHeapPageBase(heap)
 		}
-		p.AddHeap(heap)
 	}
 	return nil
 }
 
-func (p *ProcessScan) AddHeap(heap uintptr) bool {
+// addHeapPageBase add a page baseaddr of a address to the heaps of ProcessScan
+func (p *ProcessScan) addHeapPageBase(heap uintptr) bool {
+	pageSize := SystemInfo.PageSize
+	baseAddr := (heap / uintptr(pageSize)) * uintptr(pageSize)
+	return p.addHeap(baseAddr)
+}
+
+// addHeap Add a uintptr to the heaps of ProcessScan
+func (p *ProcessScan) addHeap(heap uintptr) bool {
 	if !UintptrListContains(p.Heaps, heap) {
-		// fmt.Printf("heapBock = 0x%x\n", heap)
 		p.Heaps = append(p.Heaps, heap)
 		return true
 	}
@@ -287,7 +266,7 @@ func FindEvil() (evilResults []EvilResult, err error) {
 		if os.Getpid() == process.Pid() {
 			continue
 		}
-		if process.Pid() != 8104 {
+		if process.Pid() != 30868 {
 			continue
 		}
 		// fmt.Printf("debug: Start scan process %d:%s\n", process.Pid(), process.Executable())

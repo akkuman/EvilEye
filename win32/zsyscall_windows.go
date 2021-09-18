@@ -41,6 +41,7 @@ var (
 	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
 	modntdll    = windows.NewLazySystemDLL("ntdll.dll")
 
+	procGetNativeSystemInfo       = modkernel32.NewProc("GetNativeSystemInfo")
 	procIsWow64Process            = modkernel32.NewProc("IsWow64Process")
 	procOpenProcess               = modkernel32.NewProc("OpenProcess")
 	procReadProcessMemory         = modkernel32.NewProc("ReadProcessMemory")
@@ -48,6 +49,11 @@ var (
 	procNtQueryInformationProcess = modntdll.NewProc("NtQueryInformationProcess")
 	procNtReadVirtualMemory       = modntdll.NewProc("NtReadVirtualMemory")
 )
+
+func _GetNativeSystemInfo(systemInfo *SystemInfo) {
+	syscall.Syscall(procGetNativeSystemInfo.Addr(), 1, uintptr(unsafe.Pointer(systemInfo)), 0, 0)
+	return
+}
 
 func _IsWow64Process(hProcess HANDLE, Wow64Process PBOOL) (ret BOOL) {
 	r0, _, _ := syscall.Syscall(procIsWow64Process.Addr(), 2, uintptr(hProcess), uintptr(Wow64Process), 0)

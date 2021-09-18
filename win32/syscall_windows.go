@@ -20,6 +20,12 @@ type (
 	NTSTATUS         int32
 )
 
+// ProcessorArchitecture specifies the processor architecture that the OS requires.
+type ProcessorArchitecture uint16
+
+// ProcessorType specifies the type of processor.
+type ProcessorType uint32
+
 type MEMORY_BASIC_INFORMATION struct {
 	BaseAddress       PVOID
 	AllocationBase    PVOID
@@ -37,6 +43,22 @@ type PROCESS_BASIC_INFORMATION struct {
 	BasePriority                 uintptr
 	UniqueProcessID              uintptr
 	InheritedFromUniqueProcessId uintptr
+}
+
+// SystemInfo is an equivalent representation of SYSTEM_INFO in the Windows API.
+// https://msdn.microsoft.com/en-us/library/ms724958%28VS.85%29.aspx?f=255&MSPPError=-2147217396
+type SystemInfo struct {
+	ProcessorArchitecture     ProcessorArchitecture
+	Reserved                  uint16
+	PageSize                  uint32
+	MinimumApplicationAddress uintptr
+	MaximumApplicationAddress uintptr
+	ActiveProcessorMask       uint64
+	NumberOfProcessors        uint32
+	ProcessorType             ProcessorType
+	AllocationGranularity     uint32
+	ProcessorLevel            uint16
+	ProcessorRevision         uint16
 }
 
 var (
@@ -170,9 +192,20 @@ func IsWow64Process(hProcess HANDLE) (isWow64 bool) {
 	return false
 }
 
+// GetNativeSystemInfo retrieves information about the current system to an
+// application running under WOW64. If the function is called from a 64-bit
+// application, it is equivalent to the GetSystemInfo function.
+// https://msdn.microsoft.com/en-us/library/ms724340%28v=vs.85%29.aspx?f=255&MSPPError=-2147217396
+func GetNativeSystemInfo() (SystemInfo, error) {
+	var systemInfo SystemInfo
+	_GetNativeSystemInfo(&systemInfo)
+	return systemInfo, nil
+}
+
 //sys OpenProcess(dwDesiredAccess DWORD, bInheritHandle BOOL, dwProcessId DWORD) (handle HANDLE) = kernel32.OpenProcess
 //sys _VirtualQueryEx(hProcess HANDLE, lpAddress LPCVOID, lpBuffer uintptr, dwLength SIZE_T) (size SIZE_T) = kernel32.VirtualQueryEx
 //sys _ReadProcessMemory(hProcess HANDLE, lpBaseAddress LPCVOID, lpBuffer LPVOID, nSize SIZE_T, lpNumberOfBytesRead *SIZE_T) (ret BOOL) = kernel32.ReadProcessMemory
 //sys _NtQueryInformationProcess(ProcessHandle HANDLE, ProcessInformationClass ProcessInfoClass, ProcessInformation LPVOID, ProcessInformationLength ULONG, ReturnLength PULONG) (status NTSTATUS) = ntdll.NtQueryInformationProcess
 //sys _IsWow64Process(hProcess HANDLE, Wow64Process PBOOL) (ret BOOL) = kernel32.IsWow64Process
 //sys _NtReadVirtualMemory(hProcess HANDLE, BaseAddress PVOID, Buffer PVOID, BufferLength ULONG, ReturnLength PULONG) (status NTSTATUS) = ntdll.NtReadVirtualMemory
+//sys _GetNativeSystemInfo(systemInfo *SystemInfo) = kernel32.GetNativeSystemInfo
