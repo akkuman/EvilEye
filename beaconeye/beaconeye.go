@@ -234,17 +234,42 @@ func (p *ProcessScan) SearchMemory(matchStr string, pResultArray *[]MatchResult)
 		return err
 	}
 	next := GetNext(matchArray)
-	for _, heap := range p.Heaps {
-		// fmt.Printf("debug: heap: %x\n", heap)
-		memInfo, err := win32.QueryMemoryInfo(p.Handle, win32.LPCVOID(heap))
-		if err != nil {
+	var memoryInfos []win32.MemoryInfo
+	// streamlining memory block information
+	tmp := p.Heaps[:]
+	for {
+		if len(tmp) == 0 {
 			break
 		}
-		// fmt.Printf("debug: memInfo: %#v\n", memInfo)
+		start := uintptr(0)
+		end := uintptr(0)
+		var needDel []uintptr
+		for _, heap := range tmp {
+			memInfo, err := win32.QueryMemoryInfo(p.Handle, win32.LPCVOID(heap))
+			if err != nil {
+				needDel = append(needDel, heap)
+				fmt.Printf("error: %v\n", err)
+				continue
+			}
+			start = uintptr(memInfo.BaseAddress)
+			end = uintptr(memInfo.BaseAddress) + uintptr(memInfo.RegionSize)
+			memoryInfos = append(memoryInfos, memInfo)
+			break
+		}
+		tmp_ := tmp[:]
+		tmp = []uintptr{}
+		// remove addr which need to be deleted or in previous [start, end] for next cycle
+		for _, heap := range tmp_ {
+			if !(UintptrListContains(needDel, heap) || (heap >= start && heap < end)) {
+				tmp = append(tmp, heap)
+			}
+		}
+	}
+	// search match
+	for _, memInfo := range memoryInfos {
 		if memInfo.NoAccess {
 			continue
 		}
-		// fmt.Printf("BaseAddress = %x RegionSize = %x\n", memInfo.BaseAddress, memInfo.RegionSize)
 		if err = SearchMemoryBlock(p.Handle, matchArray, uint64(memInfo.BaseAddress), int64(memInfo.RegionSize), next, pResultArray); err != nil {
 			return err
 		}
