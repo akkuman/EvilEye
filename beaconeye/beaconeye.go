@@ -114,43 +114,26 @@ func (p *ProcessScan) initHeapsInfo() (err error) {
 			return err
 		}
 		if isNTHeap && p.Is64Bit {
+			segmentListEntry, err := GetProcUintptr(p.Handle, heap+uintptr(0x18), p.Is64Bit)
+			if err != nil {
+				return err
+			}
+			segmentListEntry -= 0x18
+			p.AddHeap(segmentListEntry)
+
+			segmentNext, err := GetProcUintptr(p.Handle, heap+uintptr(0x18+0x08), p.Is64Bit)
+			if err != nil {
+				return err
+			}
+			segmentNext -= 0x18
+
+		}
+		if isNTHeap && p.Is64Bit {
 			// Get Heap Entry Xor Key
 			xorKey, err := GetProcUint16(p.Handle, heap+uintptr(0x88))
 			if err != nil {
 				return err
 			}
-			// Get SegmentListEntry
-			// typedef struct _HEAP_ENTRY
-			// {
-			// 	UINT SubSegmentCode;
-			// 	USHORT PreviousSize;
-			// 	BYTE SegmentOffset;
-			// 	BYTE UnusedBytes;
-			// }HEAP_ENTRY;
-
-			// typedef struct _HEAP_SEGMENT
-
-			// {
-			// 	HEAP_ENTRY Entry;
-			// 	UINT   SegmentSignature;
-			// 	UINT   SegmentFlags;
-			// 	LIST_ENTRY SegmentListEntry; //各heap_segment通过此字段连接
-			// 	PHEAP Heap;                  //指向所属的heap
-			// 	//...省略若干字段
-			// 	LIST_ENTRY UCRSegmentList;
-			// }HEAP_SEGMENT;
-
-			// typedef struct _HEAP
-
-			// {
-			// 	HEAP_SEGMENT Segment;
-			// 	UINT   Flags;
-			// 	UINT   ForceFlags;
-			// 	//...省略若干字段
-			// 	LIST_ENTRY SegmentList;  //通过此字段找到各heap_segment,从0号段开始，自然首先同HEAP最开始处那个HEAP_SEGMENT的SegmentListEntry链接
-			// 	//...省略若干字段
-			// 	HEAP_TUNING_PARAMETERS TuningParameters;
-			// }*PHEAP, HEAP;
 			segmentListEntry, err := GetProcUintptr(p.Handle, heap+uintptr(0x18), p.Is64Bit)
 			if err != nil {
 				return err
@@ -287,7 +270,7 @@ func FindEvil() (evilResults []EvilResult, err error) {
 		if os.Getpid() == process.Pid() {
 			continue
 		}
-		if process.Pid() != 8104 {
+		if process.Pid() != 18560 {
 			continue
 		}
 		// fmt.Printf("debug: Start scan process %d:%s\n", process.Pid(), process.Executable())
@@ -401,7 +384,7 @@ func GetNext(matchArray []uint16) []int16 {
 
 func GetProcPebAddr(hProcess win32.HANDLE) (PebAddress uintptr, err error) {
 	var basicInfo win32.PROCESS_BASIC_INFORMATION
-	var retLen win32.ULONG
+	var retLen uintptr
 	var wow64Ret uintptr
 	wow64Ret, err = GetProcWow64Info(hProcess)
 	if err != nil {
@@ -415,7 +398,7 @@ func GetProcPebAddr(hProcess win32.HANDLE) (PebAddress uintptr, err error) {
 		hProcess,
 		win32.ProcessBasicInformation,
 		unsafe.Pointer(&basicInfo),
-		win32.ULONG(win32.SizeOfProcessBasicInformation),
+		win32.SizeOfProcessBasicInformation,
 		&retLen,
 	)
 	if err != nil {
@@ -476,13 +459,13 @@ func GetProcUintptr(hProcess win32.HANDLE, addr uintptr, is64Bit bool) (ptr uint
 }
 
 func GetProcWow64Info(hProcess win32.HANDLE) (ret uintptr, err error) {
-	var ulongWow64 win32.ULONG
-	var retLen win32.ULONG
+	var ulongWow64 uintptr
+	var retLen uintptr
 	_, err = win32.NtQueryInformationProcess(
 		hProcess,
 		win32.ProcessWow64Information,
 		unsafe.Pointer(&ulongWow64),
-		win32.ULONG(unsafe.Sizeof(ulongWow64)),
+		unsafe.Sizeof(ulongWow64),
 		&retLen,
 	)
 	if err != nil {

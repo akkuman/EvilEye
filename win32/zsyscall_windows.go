@@ -41,12 +41,15 @@ var (
 	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
 	modntdll    = windows.NewLazySystemDLL("ntdll.dll")
 
-	procIsWow64Process            = modkernel32.NewProc("IsWow64Process")
-	procOpenProcess               = modkernel32.NewProc("OpenProcess")
-	procReadProcessMemory         = modkernel32.NewProc("ReadProcessMemory")
-	procVirtualQueryEx            = modkernel32.NewProc("VirtualQueryEx")
-	procNtQueryInformationProcess = modntdll.NewProc("NtQueryInformationProcess")
-	procNtReadVirtualMemory       = modntdll.NewProc("NtReadVirtualMemory")
+	procIsWow64Process                  = modkernel32.NewProc("IsWow64Process")
+	procOpenProcess                     = modkernel32.NewProc("OpenProcess")
+	procReadProcessMemory               = modkernel32.NewProc("ReadProcessMemory")
+	procVirtualQueryEx                  = modkernel32.NewProc("VirtualQueryEx")
+	procNtQueryInformationProcess       = modntdll.NewProc("NtQueryInformationProcess")
+	procNtReadVirtualMemory             = modntdll.NewProc("NtReadVirtualMemory")
+	procRtlCreateQueryDebugBuffer       = modntdll.NewProc("RtlCreateQueryDebugBuffer")
+	procRtlDestroyQueryDebugBuffer      = modntdll.NewProc("RtlDestroyQueryDebugBuffer")
+	procRtlQueryProcessDebugInformation = modntdll.NewProc("RtlQueryProcessDebugInformation")
 )
 
 func _IsWow64Process(hProcess HANDLE, Wow64Process PBOOL) (ret BOOL) {
@@ -73,7 +76,7 @@ func _VirtualQueryEx(hProcess HANDLE, lpAddress LPCVOID, lpBuffer uintptr, dwLen
 	return
 }
 
-func _NtQueryInformationProcess(ProcessHandle HANDLE, ProcessInformationClass ProcessInfoClass, ProcessInformation LPVOID, ProcessInformationLength ULONG, ReturnLength PULONG) (status NTSTATUS) {
+func _NtQueryInformationProcess(ProcessHandle HANDLE, ProcessInformationClass ProcessInfoClass, ProcessInformation LPVOID, ProcessInformationLength uintptr, ReturnLength uintptr) (status NTSTATUS) {
 	r0, _, _ := syscall.Syscall6(procNtQueryInformationProcess.Addr(), 5, uintptr(ProcessHandle), uintptr(ProcessInformationClass), uintptr(ProcessInformation), uintptr(ProcessInformationLength), uintptr(ReturnLength), 0)
 	status = NTSTATUS(r0)
 	return
@@ -81,6 +84,24 @@ func _NtQueryInformationProcess(ProcessHandle HANDLE, ProcessInformationClass Pr
 
 func _NtReadVirtualMemory(hProcess HANDLE, BaseAddress PVOID, Buffer PVOID, BufferLength ULONG, ReturnLength PULONG) (status NTSTATUS) {
 	r0, _, _ := syscall.Syscall6(procNtReadVirtualMemory.Addr(), 5, uintptr(hProcess), uintptr(BaseAddress), uintptr(Buffer), uintptr(BufferLength), uintptr(ReturnLength), 0)
+	status = NTSTATUS(r0)
+	return
+}
+
+func _RtlCreateQueryDebugBuffer(MaximumCommit ULONG, UseEventPair BOOL) (buffer *_RTL_DEBUG_INFORMATION) {
+	r0, _, _ := syscall.Syscall(procRtlCreateQueryDebugBuffer.Addr(), 2, uintptr(MaximumCommit), uintptr(UseEventPair), 0)
+	buffer = (*_RTL_DEBUG_INFORMATION)(unsafe.Pointer(r0))
+	return
+}
+
+func _RtlDestroyQueryDebugBuffer(Buffer *_RTL_DEBUG_INFORMATION) (status NTSTATUS) {
+	r0, _, _ := syscall.Syscall(procRtlDestroyQueryDebugBuffer.Addr(), 1, uintptr(unsafe.Pointer(Buffer)), 0, 0)
+	status = NTSTATUS(r0)
+	return
+}
+
+func _RtlQueryProcessDebugInformation(UniqueProcessId HANDLE, Flags ULONG, Buffer *_RTL_DEBUG_INFORMATION) (status NTSTATUS) {
+	r0, _, _ := syscall.Syscall(procRtlQueryProcessDebugInformation.Addr(), 3, uintptr(UniqueProcessId), uintptr(Flags), uintptr(unsafe.Pointer(Buffer)))
 	status = NTSTATUS(r0)
 	return
 }

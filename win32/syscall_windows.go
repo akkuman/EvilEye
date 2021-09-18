@@ -15,9 +15,10 @@ type (
 	SIZE_T           uintptr
 	LPCVOID          uintptr
 	ProcessInfoClass uint32
-	ULONG            uintptr
+	ULONG            uint32
 	PULONG           uintptr
 	NTSTATUS         int32
+	USHORT           uint16
 )
 
 type MEMORY_BASIC_INFORMATION struct {
@@ -28,6 +29,52 @@ type MEMORY_BASIC_INFORMATION struct {
 	State             DWORD
 	Protect           DWORD
 	Type              DWORD
+}
+
+type _RTL_DEBUG_INFORMATION struct {
+	SectionHandleClient HANDLE
+	ViewBaseClient      PVOID
+	ViewBaseTarget      PVOID
+	ViewBaseDelta       uintptr
+	EventPairClient     HANDLE
+	EventPairTarget     HANDLE
+	TargetProcessId     HANDLE
+	TargetThreadHandle  HANDLE
+	Flags               ULONG
+	_                   [4]byte
+	OffsetFree          SIZE_T
+	CommitSize          SIZE_T
+	ViewSize            SIZE_T
+	Modules             PVOID
+	BackTraces          PVOID
+	Heaps               *RTL_PROCESS_HEAPS
+	Locks               PVOID
+	SpecificHeap        PVOID
+	TargetProcessHandle HANDLE
+	Reserved            [6]PVOID
+}
+
+type RTL_HEAP_INFORMATION struct {
+	BaseAddress           PVOID
+	Flags                 ULONG
+	EntryOverhead         USHORT
+	CreatorBackTraceIndex USHORT
+	BytesAllocated        SIZE_T
+	BytesCommitted        SIZE_T
+	NumberOfTags          ULONG
+	NumberOfEntries       ULONG
+	NumberOfPseudoTags    ULONG
+	PseudoTagGranularity  ULONG
+	Reserved              [5]ULONG
+	_                     [4]byte
+	Tags                  PVOID
+	Entries               PVOID
+}
+
+type RTL_PROCESS_HEAPS struct {
+	NumberOfHeaps ULONG
+	_             [4]byte
+	Heaps         [100]RTL_HEAP_INFORMATION
 }
 
 type PROCESS_BASIC_INFORMATION struct {
@@ -57,6 +104,9 @@ var (
 	ExecuteReadWrite DWORD = 0x40
 	ExecuteRead      DWORD = 0x20
 	NoAccess         DWORD = 0x01
+
+	RTL_QUERY_PROCESS_HEAP_SUMMARY DWORD = 0x00000004
+	RTL_QUERY_PROCESS_HEAP_ENTRIES DWORD = 0x00000010
 )
 
 const PROCESS_ALL_ACCESS = DWORD(0x1F0FFF)
@@ -146,13 +196,13 @@ func ReadProcessMemory(hProcess HANDLE, lpBaseAddress LPCVOID, lpBuffer []byte) 
 	return readIdx, nil
 }
 
-func NtQueryInformationProcess(ProcessHandle HANDLE, ProcessInformationClass ProcessInfoClass, ProcessInformation unsafe.Pointer, ProcessInformationLength ULONG, ReturnLength *ULONG) (status NTSTATUS, err error) {
+func NtQueryInformationProcess(ProcessHandle HANDLE, ProcessInformationClass ProcessInfoClass, ProcessInformation unsafe.Pointer, ProcessInformationLength uintptr, ReturnLength *uintptr) (status NTSTATUS, err error) {
 	ret := _NtQueryInformationProcess(
 		ProcessHandle,
 		ProcessInformationClass,
 		LPVOID(unsafe.Pointer(ProcessInformation)),
 		ProcessInformationLength,
-		PULONG(unsafe.Pointer(ReturnLength)),
+		uintptr(unsafe.Pointer(ReturnLength)),
 	)
 	status = NTSTATUS(ret)
 	if status < 0 {
@@ -170,9 +220,37 @@ func IsWow64Process(hProcess HANDLE) (isWow64 bool) {
 	return false
 }
 
+func RtlCreateQueryDebugBuffer(MaximumCommit int, UseEventPair bool) (buffer *_RTL_DEBUG_INFORMATION) {
+	useEventPair := FALSE
+	if UseEventPair {
+		useEventPair = TRUE
+	}
+	buffer = _RtlCreateQueryDebugBuffer(ULONG(MaximumCommit), useEventPair)
+	return
+}
+
+func RtlDestroyQueryDebugBuffer(Buffer *_RTL_DEBUG_INFORMATION) (status NTSTATUS, err error) {
+	status = _RtlDestroyQueryDebugBuffer(Buffer)
+	if status < 0 {
+		err = fmt.Errorf("call RtlDestroyQueryDebugBuffer failed, err code: %x", uint32(status))
+	}
+	return
+}
+
+func RtlQueryProcessDebugInformation(UniqueProcessId HANDLE, Flags ULONG, Buffer *_RTL_DEBUG_INFORMATION) (status NTSTATUS, err error) {
+	status = _RtlQueryProcessDebugInformation(UniqueProcessId, Flags, Buffer)
+	if status < 0 {
+		err = fmt.Errorf("call RtlQueryProcessDebugInformation failed, err code: %x", uint32(status))
+	}
+	return
+}
+
 //sys OpenProcess(dwDesiredAccess DWORD, bInheritHandle BOOL, dwProcessId DWORD) (handle HANDLE) = kernel32.OpenProcess
 //sys _VirtualQueryEx(hProcess HANDLE, lpAddress LPCVOID, lpBuffer uintptr, dwLength SIZE_T) (size SIZE_T) = kernel32.VirtualQueryEx
 //sys _ReadProcessMemory(hProcess HANDLE, lpBaseAddress LPCVOID, lpBuffer LPVOID, nSize SIZE_T, lpNumberOfBytesRead *SIZE_T) (ret BOOL) = kernel32.ReadProcessMemory
-//sys _NtQueryInformationProcess(ProcessHandle HANDLE, ProcessInformationClass ProcessInfoClass, ProcessInformation LPVOID, ProcessInformationLength ULONG, ReturnLength PULONG) (status NTSTATUS) = ntdll.NtQueryInformationProcess
+//sys _NtQueryInformationProcess(ProcessHandle HANDLE, ProcessInformationClass ProcessInfoClass, ProcessInformation LPVOID, ProcessInformationLength uintptr, ReturnLength uintptr) (status NTSTATUS) = ntdll.NtQueryInformationProcess
 //sys _IsWow64Process(hProcess HANDLE, Wow64Process PBOOL) (ret BOOL) = kernel32.IsWow64Process
 //sys _NtReadVirtualMemory(hProcess HANDLE, BaseAddress PVOID, Buffer PVOID, BufferLength ULONG, ReturnLength PULONG) (status NTSTATUS) = ntdll.NtReadVirtualMemory
+//sys _RtlCreateQueryDebugBuffer(MaximumCommit ULONG, UseEventPair BOOL) (buffer *_RTL_DEBUG_INFORMATION) = ntdll.RtlCreateQueryDebugBuffer
+//sys _RtlQueryProcessDebugInformation(UniqueProcessId HANDLE, Flags ULONG, Buffer *_RTL_DEBUG_INFORMATION) (status NTSTATUS) = ntdll.RtlQueryProcessDebugInformation
+//sys _RtlDestroyQueryDebugBuffer(Buffer *_RTL_DEBUG_INFORMATION) (status NTSTATUS) = ntdll.RtlDestroyQueryDebugBuffer

@@ -17,7 +17,7 @@ func GetProcesses() (needScanProcesses []gops.Process, err error) {
 
 	for _, process := range processes {
 		var basicInfo win32.PROCESS_BASIC_INFORMATION
-		var retLen win32.ULONG
+		var retLen uintptr
 		hProcess := win32.OpenProcess(win32.PROCESS_ALL_ACCESS, win32.FALSE, win32.DWORD(process.Pid()))
 		if hProcess == 0 {
 			continue
@@ -26,7 +26,7 @@ func GetProcesses() (needScanProcesses []gops.Process, err error) {
 			hProcess,
 			win32.ProcessBasicInformation,
 			unsafe.Pointer(&basicInfo),
-			win32.ULONG(win32.SizeOfProcessBasicInformation),
+			win32.SizeOfProcessBasicInformation,
 			&retLen,
 		)
 		if err != nil {
