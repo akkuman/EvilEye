@@ -137,6 +137,10 @@ func (p *ProcessScan) getAllHeapBlocks(seg uintptr, xorkey uint16) (blocks []uin
 			return blocks, err
 		}
 		size = (size ^ xorkey) << 4
+		// Dealing with dead loops in some special cases where size == 0
+		if size == 0 {
+			break
+		}
 		startAddr = startAddr + uintptr(size)
 		if startAddr > lastValidEntry {
 			break
@@ -169,10 +173,8 @@ func (p *ProcessScan) initHeapsInfo() (err error) {
 	}
 
 	for idx := 0; uint32(idx) < p.NumberOfHeaps; idx++ {
-		var len_ int
 		var heap uintptr
-		len_ = p.pointerSize()
-		heap, err = GetProcUintptr(p.Handle, p.ProcHeapsArrayAddr+uintptr(idx*len_), p.Is64Bit)
+		heap, err = GetProcUintptr(p.Handle, p.ProcHeapsArrayAddr+uintptr(idx*p.pointerSize()), p.Is64Bit)
 		if err != nil {
 			return
 		}
@@ -289,9 +291,6 @@ func FindEvil() (evilResults []EvilResult, err error) {
 	for _, process := range processes {
 		// 如果是当前运行进程则跳过
 		if os.Getpid() == process.Pid() {
-			continue
-		}
-		if process.Pid() != 30868 {
 			continue
 		}
 		// fmt.Printf("debug: Start scan process %d:%s\n", process.Pid(), process.Executable())
