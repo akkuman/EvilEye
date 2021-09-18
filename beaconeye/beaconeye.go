@@ -78,7 +78,7 @@ func NewProcessScan(pid win32.DWORD) (processScan *ProcessScan, err error) {
 	return
 }
 
-func (p *ProcessScan) pointerSize() int {
+func (p *ProcessScan) pointerSize() uintptr {
 	if p.Is64Bit {
 		return 8
 	}
@@ -104,24 +104,24 @@ func (p *ProcessScan) getOffsetSegmentList() (offset uintptr) {
 }
 
 func (p *ProcessScan) getAllHeapSegments(heap uintptr) (segs []uintptr, err error) {
-	var tmp []uintptr
+	var trace []uintptr
 	segs = append(segs, heap)
 	offsetSegmentList := p.getOffsetSegmentList()
 	offsetSegmentListEntry := p.getOffsetSegmentListEntry()
 	segmentListEntryBlink := heap
 	for {
-		segmentListEntryBlink, err = GetProcUintptr(p.Handle, segmentListEntryBlink+offsetSegmentListEntry+uintptr(0x8), p.Is64Bit)
+		segmentListEntryBlink, err = GetProcUintptr(p.Handle, segmentListEntryBlink+offsetSegmentListEntry+p.pointerSize(), p.Is64Bit)
 		if err != nil {
 			return segs, err
 		}
-		if UintptrListContains(tmp, segmentListEntryBlink) {
+		if UintptrListContains(trace, segmentListEntryBlink) {
 			break
 		}
-		tmp = append(tmp, segmentListEntryBlink)
+		trace = append(trace, segmentListEntryBlink)
 		segmentAddr := segmentListEntryBlink - p.getOffsetSegmentListEntry()
 		if segmentListEntryBlink != heap+offsetSegmentList &&
 			segmentListEntryBlink != heap+offsetSegmentListEntry &&
-			!UintptrListContains(segs, segmentListEntryBlink) {
+			!UintptrListContains(segs, segmentAddr) {
 			segs = append(segs, segmentAddr)
 		}
 		segmentListEntryBlink = segmentAddr
@@ -186,7 +186,7 @@ func (p *ProcessScan) initHeapsInfo() (err error) {
 
 	for idx := 0; uint32(idx) < p.NumberOfHeaps; idx++ {
 		var heap uintptr
-		heap, err = GetProcUintptr(p.Handle, p.ProcHeapsArrayAddr+uintptr(idx*p.pointerSize()), p.Is64Bit)
+		heap, err = GetProcUintptr(p.Handle, p.ProcHeapsArrayAddr+uintptr(idx)*p.pointerSize(), p.Is64Bit)
 		if err != nil {
 			return
 		}
@@ -198,26 +198,32 @@ func (p *ProcessScan) initHeapsInfo() (err error) {
 			return err
 		}
 		// TODO: support 32bit process
-		if isNTHeap && p.Is64Bit {
-			// Get Heap Entry Xor Key
-			xorKey, err := GetProcUint16(p.Handle, heap+uintptr(0x88))
-			if err != nil {
-				return err
-			}
+		if isNTHeap {
 			// get all heap segment from a heap
 			segs, err := p.getAllHeapSegments(heap)
 			if err != nil {
 				return err
 			}
-			// get all block from a heap segment
-			for _, segment := range segs {
-				p.addHeapPageBase(segment)
-				blocks, err := p.getAllHeapBlocks(segment, xorKey)
+			if p.Is64Bit {
+				// Get Heap Entry Xor Key
+				xorKey, err := GetProcUint16(p.Handle, heap+uintptr(0x88))
 				if err != nil {
 					return err
 				}
-				for _, block := range blocks {
-					p.addHeapPageBase(block)
+				// get all block from a heap segment
+				for _, segment := range segs {
+					p.addHeapPageBase(segment)
+					blocks, err := p.getAllHeapBlocks(segment, xorKey)
+					if err != nil {
+						return err
+					}
+					for _, block := range blocks {
+						p.addHeapPageBase(block)
+					}
+				}
+			} else {
+				for _, segment := range segs {
+					p.addHeapPageBase(segment)
 				}
 			}
 		} else {
