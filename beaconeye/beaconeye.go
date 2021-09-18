@@ -21,9 +21,9 @@ type MatchResult struct {
 }
 
 type EvilResult struct {
-	Arch string
-	Path string
-	Addr uint64
+	Pid   int
+	Name  string
+	Match []MatchResult
 }
 
 var SystemInfo win32.SystemInfo
@@ -295,7 +295,8 @@ func (p *ProcessScan) SearchMemory(matchStr string, pResultArray *[]MatchResult)
 	return nil
 }
 
-func FindEvil() (evilResults []EvilResult, err error) {
+func FindEvil(evilResults chan EvilResult) (err error) {
+	defer close(evilResults)
 	var processes []gops.Process
 	processes, err = GetProcesses()
 	if err != nil {
@@ -324,7 +325,11 @@ func FindEvil() (evilResults []EvilResult, err error) {
 			continue
 		}
 		if len(resultArray) != 0 {
-			fmt.Printf("find evil: %s\n", process.Executable())
+			evilResults <- EvilResult{
+				Pid:   process.Pid(),
+				Name:  process.Executable(),
+				Match: resultArray,
+			}
 		}
 		// searchEvil(handle, "4C 8B 53 08 45 8B 0A 45 8B 5A 04 4D 8D 52 08 45 85 C9 75 05 45 85 DB 74 33 45 3B CB 73 E6 49 8B F9 4C 8B 03", 0x410000, 0xFFFFFFFF, &evilResults, process, "x64-1")
 		// searchEvil(handle, "8B 46 04 8B 08 8B 50 04 83 C0 08 89 55 08 89 45 0C 85 C9 75 04 85 D2 74 23 3B CA 73 E6 8B 06 8D 3C 08 33 D2", 0x410000, 0xFFFFFFFF, &evilResults, process, "x86-2")
