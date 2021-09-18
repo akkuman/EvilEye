@@ -4,6 +4,14 @@ EvilEye is a [BeaconEye](https://github.com/CCob/BeaconEye) implement in Golang.
 
 # Try & Run
 
+download EvilEye in [releases](https://github.com/akkuman/EvilEye/releases)
+
+```shell
+./EvilEye.exe
+```
+
+# Build
+
 ```shell
 go install github.com/akkuman/EvilEye
 ```
