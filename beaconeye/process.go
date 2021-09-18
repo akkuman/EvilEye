@@ -2,8 +2,9 @@ package beaconeye
 
 import (
 	"fmt"
-	"gBeaconEye/win32"
 	"unsafe"
+
+	"github.com/akkuman/EvilEye/win32"
 
 	gops "github.com/mitchellh/go-ps"
 )

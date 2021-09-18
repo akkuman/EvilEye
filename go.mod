@@ -1,4 +1,4 @@
-module gBeaconEye
+module github.com/akkuman/EvilEye
 
 go 1.17
 

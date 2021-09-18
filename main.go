@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"gBeaconEye/beaconeye"
 	"time"
+
+	"github.com/akkuman/EvilEye/beaconeye"
 )
 
 func main() {

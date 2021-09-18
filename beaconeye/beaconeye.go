@@ -4,11 +4,12 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"gBeaconEye/win32"
 	"os"
 	"strings"
 	"syscall"
 	"unsafe"
+
+	"github.com/akkuman/EvilEye/win32"
 
 	gops "github.com/mitchellh/go-ps"
 )
