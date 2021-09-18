@@ -38,6 +38,10 @@ func main() {
 
 ```
 
+# TODO
+
+- Extraction configuration from memory
+
 
 # References
 - [Windows 10 Nt Heap Exploitation (English version)](https://www.slideshare.net/AngelBoy1/windows-10-nt-heap-exploitation-english-version)
