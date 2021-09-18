@@ -86,11 +86,21 @@ func (p *ProcessScan) pointerSize() int {
 }
 
 func (p *ProcessScan) getOffsetSegmentListEntry() (offset uintptr) {
-	return uintptr(0x18)
+	if p.Is64Bit {
+		offset = uintptr(0x18)
+	} else {
+		offset = uintptr(0x10)
+	}
+	return
 }
 
 func (p *ProcessScan) getOffsetSegmentList() (offset uintptr) {
-	return uintptr(0x120)
+	if p.Is64Bit {
+		offset = uintptr(0x120)
+	} else {
+		offset = uintptr(0xa4)
+	}
+	return
 }
 
 func (p *ProcessScan) getAllHeapSegments(heap uintptr) (segs []uintptr, err error) {
@@ -119,6 +129,8 @@ func (p *ProcessScan) getAllHeapSegments(heap uintptr) (segs []uintptr, err erro
 	return segs, nil
 }
 
+// getAllHeapBlocks get all blocks from a heap segment
+// TOOO: speed up according to the pagesize
 func (p *ProcessScan) getAllHeapBlocks(seg uintptr, xorkey uint16) (blocks []uintptr, err error) {
 	firstEntry, err := GetProcUintptr(p.Handle, seg+uintptr(0x40), p.Is64Bit)
 	if err != nil {
@@ -185,6 +197,7 @@ func (p *ProcessScan) initHeapsInfo() (err error) {
 		if err != nil {
 			return err
 		}
+		// TODO: support 32bit process
 		if isNTHeap && p.Is64Bit {
 			// Get Heap Entry Xor Key
 			xorKey, err := GetProcUint16(p.Handle, heap+uintptr(0x88))
@@ -287,7 +300,6 @@ func FindEvil() (evilResults []EvilResult, err error) {
 	}
 	rule64 := "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 ?? 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 ?? ?? 00 00 00 00 00 00 02 00 00 00 00 00 00 00 ?? ?? ?? ?? 00 00 00 00 02 00 00 00 00 00 00 00 ?? ?? ?? ?? 00 00 00 00 01 00 00 00 00 00 00 00 ?? ?? 00 00 00 00 00 00"
 	rule32 := "00 00 00 00 00 00 00 00 01 00 00 00 ?? 00 00 00 01 00 00 00 ?? ?? 00 00 02 00 00 00 ?? ?? ?? ?? 02 00 00 00 ?? ?? ?? ?? 01 00 00 00 ?? ?? 00 00"
-	// fmt.Printf("debug: Number of processes: %d\n", len(processes))
 	for _, process := range processes {
 		// 如果是当前运行进程则跳过
 		if os.Getpid() == process.Pid() {

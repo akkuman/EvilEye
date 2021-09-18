@@ -13,7 +13,7 @@ func main() {
 		panic(err)
 	}
 	v2 := time.Now()
-	fmt.Println(v2.Sub(v1))
+	fmt.Printf("The program took %v to run\n", v2.Sub(v1))
 	var prev string
 	for _, v := range evils {
 		if prev == v.Path {
