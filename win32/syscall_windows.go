@@ -26,6 +26,23 @@ type ProcessorArchitecture uint16
 // ProcessorType specifies the type of processor.
 type ProcessorType uint32
 
+type MEMORY_INFORMATION_CLASS int
+
+const (
+	MemoryBasicInformation MEMORY_INFORMATION_CLASS = iota
+	MemoryWorkingSetInformation
+	MemoryMappedFilenameInformation
+	MemoryRegionInformation
+	MemoryWorkingSetExInformation
+	MemorySharedCommitInformation
+	MemoryImageInformation
+	MemoryRegionInformationEx
+	MemoryPrivilegedBasicInformation
+	MemoryEnclaveImageInformation
+	MemoryBasicInformationCapped
+	MemoryPhysicalContiguityInformation
+)
+
 type MEMORY_BASIC_INFORMATION struct {
 	BaseAddress       PVOID
 	AllocationBase    PVOID
@@ -202,6 +219,17 @@ func GetNativeSystemInfo() (SystemInfo, error) {
 	return systemInfo, nil
 }
 
+func NtQueryVirtualMemory(hProcess HANDLE, BaseAddress LPCVOID) (mbi MEMORY_BASIC_INFORMATION, err error) {
+	fmt.Printf("\nhProcess: %x base: %x\n", hProcess, BaseAddress)
+	retLength := new(SIZE_T)
+	ret := _NtQueryVirtualMemory(hProcess, BaseAddress, MemoryBasicInformation, PVOID(unsafe.Pointer(&mbi)), SIZE_T(unsafe.Sizeof(mbi)), retLength)
+	status := NTSTATUS(ret)
+	if status < 0 {
+		err = fmt.Errorf("call NtQueryVirtualMemory failed, err code: %x", uint32(status))
+	}
+	return
+}
+
 //sys OpenProcess(dwDesiredAccess DWORD, bInheritHandle BOOL, dwProcessId DWORD) (handle HANDLE) = kernel32.OpenProcess
 //sys _VirtualQueryEx(hProcess HANDLE, lpAddress LPCVOID, lpBuffer uintptr, dwLength SIZE_T) (size SIZE_T) = kernel32.VirtualQueryEx
 //sys _ReadProcessMemory(hProcess HANDLE, lpBaseAddress LPCVOID, lpBuffer LPVOID, nSize SIZE_T, lpNumberOfBytesRead *SIZE_T) (ret BOOL) = kernel32.ReadProcessMemory
@@ -209,3 +237,4 @@ func GetNativeSystemInfo() (SystemInfo, error) {
 //sys _IsWow64Process(hProcess HANDLE, Wow64Process PBOOL) (ret BOOL) = kernel32.IsWow64Process
 //sys _NtReadVirtualMemory(hProcess HANDLE, BaseAddress PVOID, Buffer PVOID, BufferLength ULONG, ReturnLength PULONG) (status NTSTATUS) = ntdll.NtReadVirtualMemory
 //sys _GetNativeSystemInfo(systemInfo *SystemInfo) = kernel32.GetNativeSystemInfo
+//sys _NtQueryVirtualMemory(hProcess HANDLE, BaseAddress LPCVOID, MemoryInformationClass MEMORY_INFORMATION_CLASS, MemoryInformation PVOID, MemoryInformationLength SIZE_T, ReturnLength *SIZE_T) (status NTSTATUS) = ntdll.NtQueryVirtualMemory

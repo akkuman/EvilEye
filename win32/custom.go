@@ -1,6 +1,9 @@
 package win32
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"math"
+)
 
 type MemoryInfo struct {
 	MEMORY_BASIC_INFORMATION
@@ -25,6 +28,27 @@ func QueryMemoryInfo(hProcess HANDLE, lpAddress LPCVOID) (memInfo MemoryInfo, er
 	memInfo.IsExecutable = memInfo.MEMORY_BASIC_INFORMATION.Protect == DWORD(ExecuteRead) ||
 		memInfo.MEMORY_BASIC_INFORMATION.Protect == DWORD(ExecuteReadWrite)
 	memInfo.NoAccess = memInfo.MEMORY_BASIC_INFORMATION.Protect&NoAccess == NoAccess
+	return
+}
+
+func QueryAllMemoryInformation(hProcess HANDLE) (memInfos []MemoryInfo, err error) {
+	lpAddress := LPCVOID(0)
+	for lpAddress < math.MaxInt64 {
+		var memInfo MemoryInfo
+		var innerErr error
+		memInfo.MEMORY_BASIC_INFORMATION, innerErr = NtQueryVirtualMemory(hProcess, lpAddress)
+		if innerErr != nil {
+			// fmt.Printf("\nerror querying memory information: %v\n", err)
+			break
+		}
+		memInfo.IsExecutable = memInfo.MEMORY_BASIC_INFORMATION.Protect == DWORD(ExecuteRead) ||
+			memInfo.MEMORY_BASIC_INFORMATION.Protect == DWORD(ExecuteReadWrite)
+		memInfo.NoAccess = memInfo.MEMORY_BASIC_INFORMATION.Protect&NoAccess == NoAccess
+
+		memInfos = append(memInfos, memInfo)
+
+		lpAddress += LPCVOID(memInfo.MEMORY_BASIC_INFORMATION.RegionSize)
+	}
 	return
 }
 

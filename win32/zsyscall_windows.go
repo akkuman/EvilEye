@@ -47,6 +47,7 @@ var (
 	procReadProcessMemory         = modkernel32.NewProc("ReadProcessMemory")
 	procVirtualQueryEx            = modkernel32.NewProc("VirtualQueryEx")
 	procNtQueryInformationProcess = modntdll.NewProc("NtQueryInformationProcess")
+	procNtQueryVirtualMemory      = modntdll.NewProc("NtQueryVirtualMemory")
 	procNtReadVirtualMemory       = modntdll.NewProc("NtReadVirtualMemory")
 )
 
@@ -81,6 +82,12 @@ func _VirtualQueryEx(hProcess HANDLE, lpAddress LPCVOID, lpBuffer uintptr, dwLen
 
 func _NtQueryInformationProcess(ProcessHandle HANDLE, ProcessInformationClass ProcessInfoClass, ProcessInformation LPVOID, ProcessInformationLength ULONG, ReturnLength PULONG) (status NTSTATUS) {
 	r0, _, _ := syscall.Syscall6(procNtQueryInformationProcess.Addr(), 5, uintptr(ProcessHandle), uintptr(ProcessInformationClass), uintptr(ProcessInformation), uintptr(ProcessInformationLength), uintptr(ReturnLength), 0)
+	status = NTSTATUS(r0)
+	return
+}
+
+func _NtQueryVirtualMemory(hProcess HANDLE, BaseAddress LPCVOID, MemoryInformationClass MEMORY_INFORMATION_CLASS, MemoryInformation PVOID, MemoryInformationLength SIZE_T, ReturnLength *SIZE_T) (status NTSTATUS) {
+	r0, _, _ := syscall.Syscall6(procNtQueryVirtualMemory.Addr(), 6, uintptr(hProcess), uintptr(BaseAddress), uintptr(MemoryInformationClass), uintptr(MemoryInformation), uintptr(MemoryInformationLength), uintptr(unsafe.Pointer(ReturnLength)))
 	status = NTSTATUS(r0)
 	return
 }
