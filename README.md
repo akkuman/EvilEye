@@ -1,6 +1,6 @@
 # EvilEye
 
-EvilEye is a [BeaconEye](https://github.com/CCob/BeaconEye) implement in Golang.
+EvilEye is a [BeaconEye](https://github.com/CCob/BeaconEye) implement in Golang. It is used to detect the cobaltstrike beacon from memory and extract some configuration.
 
 # Try & Run
 
