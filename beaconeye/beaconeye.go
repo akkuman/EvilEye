@@ -22,9 +22,10 @@ type MatchResult struct {
 }
 
 type EvilResult struct {
-	Pid   int
-	Name  string
-	Match []MatchResult
+	Pid       int
+	Name      string
+	Address   uint64
+	Extractor ConfigExtractor
 }
 
 var SystemInfo win32.SystemInfo
@@ -325,11 +326,23 @@ func FindEvil(evilResults chan EvilResult) (err error) {
 			fmt.Printf("SearchMemory error: %v\n", err)
 			continue
 		}
-		if len(resultArray) != 0 {
+		for i := range resultArray {
+			configStart := uintptr(resultArray[i].Addr)
+			configBytes, err := win32.NtReadVirtualMemory(processScan.Handle, win32.PVOID(configStart), int64(processScan.pointerSize())*0x100)
+			if err != nil {
+				fmt.Printf("NtReadVirtualMemory error: %v", err)
+				continue
+			}
+			extractor, err := NewConfigExtractor(configStart, configBytes, *processScan)
+			if err != nil {
+				fmt.Printf("NewConfigExtractor error: %v", err)
+				continue
+			}
 			evilResults <- EvilResult{
-				Pid:   process.Pid(),
-				Name:  process.Executable(),
-				Match: resultArray,
+				Pid:       process.Pid(),
+				Name:      process.Executable(),
+				Extractor: *extractor,
+				Address:   resultArray[i].Addr,
 			}
 		}
 		// searchEvil(handle, "4C 8B 53 08 45 8B 0A 45 8B 5A 04 4D 8D 52 08 45 85 C9 75 05 45 85 DB 74 33 45 3B CB 73 E6 49 8B F9 4C 8B 03", 0x410000, 0xFFFFFFFF, &evilResults, process, "x64-1")
@@ -341,6 +354,7 @@ func FindEvil(evilResults chan EvilResult) (err error) {
 func SearchMemoryBlock(hProcess win32.HANDLE, matchArray []uint16, startAddr uint64, size int64, next []int16, pResultArray *[]MatchResult) (err error) {
 	var memBuf []byte
 	memBuf, err = win32.NtReadVirtualMemory(hProcess, win32.PVOID(startAddr), size)
+	size = int64(len(memBuf))
 	if err != nil {
 		err = fmt.Errorf("%v: %v", err, syscall.GetLastError())
 		return
