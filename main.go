@@ -16,7 +16,7 @@ func main() {
 	v1 := time.Now()
 	evilResults := make(chan beaconeye.EvilResult)
 	go func() {
-		err := beaconeye.FindEvil(evilResults)
+		err := beaconeye.FindEvil(evilResults, 4)
 		if err != nil {
 			panic(err)
 		}

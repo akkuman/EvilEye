@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -36,6 +37,22 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+type sSearchIn struct {
+	procScan   *ProcessScan
+	matchArray []uint16
+	nextArray  []int16
+	memInfo    win32.MemoryInfo
+	process    gops.Process
+}
+
+var onceCloseSearchOut sync.Once
+
+type sSearchOut struct {
+	procScan *ProcessScan
+	process  gops.Process
+	addr     uintptr
 }
 
 type ProcessScan struct {
@@ -163,6 +180,32 @@ func (p *ProcessScan) getAllHeapBlocks(seg uintptr, xorkey uint16) (blocks []uin
 	return blocks, err
 }
 
+// getAllRegion get all region from a heap segment according to FirstEntry and LastValidEntry
+func (p *ProcessScan) getAllRegion(seg uintptr) (regions []uintptr, err error) {
+	firstEntry, err := GetProcUintptr(p.Handle, seg+uintptr(0x40), p.Is64Bit)
+	if err != nil {
+		return regions, err
+	}
+	lastValidEntry, err := GetProcUintptr(p.Handle, seg+uintptr(0x48), p.Is64Bit)
+	if err != nil {
+		return regions, err
+	}
+	startAddr := firstEntry
+	for {
+		memInfo, err := win32.QueryMemoryInfo(p.Handle, win32.LPCVOID(startAddr))
+		if err != nil {
+			fmt.Printf("error: %v\n", err)
+			continue
+		}
+		regions = append(regions, uintptr(memInfo.BaseAddress))
+		startAddr = uintptr(memInfo.BaseAddress) + uintptr(memInfo.RegionSize)
+		if startAddr > lastValidEntry {
+			break
+		}
+	}
+	return
+}
+
 func (p *ProcessScan) initHeapsInfo() (err error) {
 	var numHeapsAddr uintptr
 	var heapArrayAddr uintptr
@@ -204,20 +247,15 @@ func (p *ProcessScan) initHeapsInfo() (err error) {
 				return err
 			}
 			if p.Is64Bit {
-				// Get Heap Entry Xor Key
-				xorKey, err := GetProcUint16(p.Handle, heap+uintptr(0x88))
-				if err != nil {
-					return err
-				}
 				// get all block from a heap segment
 				for _, segment := range segs {
 					p.addHeapPageBase(segment)
-					blocks, err := p.getAllHeapBlocks(segment, xorKey)
+					regions, err := p.getAllRegion(segment)
 					if err != nil {
 						return err
 					}
-					for _, block := range blocks {
-						p.addHeapPageBase(block)
+					for _, region := range regions {
+						p.addHeapPageBase(region)
 					}
 				}
 			} else {
@@ -248,12 +286,7 @@ func (p *ProcessScan) addHeap(heap uintptr) bool {
 	return false
 }
 
-func (p *ProcessScan) SearchMemory(matchStr string, pResultArray *[]MatchResult) (err error) {
-	matchArray, err := GetMatchArray(matchStr)
-	if err != nil {
-		return err
-	}
-	next := GetNext(matchArray)
+func (p *ProcessScan) SearchMemory(matchArray []uint16, nextArray []int16, process gops.Process, searchIn chan sSearchIn) {
 	var memoryInfos []win32.MemoryInfo
 	// streamlining memory block information
 	tmp := p.Heaps[:]
@@ -290,15 +323,50 @@ func (p *ProcessScan) SearchMemory(matchStr string, pResultArray *[]MatchResult)
 		if memInfo.NoAccess {
 			continue
 		}
-		if err = SearchMemoryBlock(p.Handle, matchArray, uint64(memInfo.BaseAddress), int64(memInfo.RegionSize), next, pResultArray); err != nil {
-			return err
+		searchIn <- sSearchIn{
+			procScan:   p,
+			matchArray: matchArray,
+			nextArray:  nextArray,
+			memInfo:    memInfo,
+			process:    process,
 		}
 	}
-	return nil
 }
 
-func FindEvil(evilResults chan EvilResult) (err error) {
-	defer close(evilResults)
+func initMultiThreadSearchMemoryBlock(threadNum int, searchIn chan sSearchIn, searchOut chan sSearchOut) {
+	for i := 0; i < threadNum; i++ {
+		go func() {
+			for item := range searchIn {
+				var resultArray []MatchResult
+				if err := SearchMemoryBlock(item.procScan.Handle, item.matchArray, uint64(item.memInfo.BaseAddress), int64(item.memInfo.RegionSize), item.nextArray, &resultArray); err != nil {
+					fmt.Printf("SearchMemoryBlock error: %v\n", err)
+					continue
+				}
+				for j := range resultArray {
+					searchOut <- sSearchOut{
+						procScan: item.procScan,
+						process:  item.process,
+						addr:     uintptr(resultArray[j].Addr),
+					}
+				}
+			}
+			onceCloseSearchOut.Do(func() {
+				close(searchOut)
+			})
+		}()
+	}
+}
+
+func GetMatchArrayAndNext(rule string) (matchArray []uint16, nextArray []int16, err error) {
+	matchArray, err = GetMatchArray(rule)
+	if err != nil {
+		return
+	}
+	nextArray = GetNext(matchArray)
+	return
+}
+
+func FindEvil(evilResults chan EvilResult, threadNum int) (err error) {
 	var processes []gops.Process
 	processes, err = GetProcesses()
 	if err != nil {
@@ -306,6 +374,18 @@ func FindEvil(evilResults chan EvilResult) (err error) {
 	}
 	rule64 := "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 ?? 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 ?? ?? 00 00 00 00 00 00 02 00 00 00 00 00 00 00 ?? ?? ?? ?? 00 00 00 00 02 00 00 00 00 00 00 00 ?? ?? ?? ?? 00 00 00 00 01 00 00 00 00 00 00 00 ?? ?? 00 00 00 00 00 00"
 	rule32 := "00 00 00 00 00 00 00 00 01 00 00 00 ?? 00 00 00 01 00 00 00 ?? ?? 00 00 02 00 00 00 ?? ?? ?? ?? 02 00 00 00 ?? ?? ?? ?? 01 00 00 00 ?? ?? 00 00"
+	matchArray64, nextArray64, err := GetMatchArrayAndNext(rule64)
+	if err != nil {
+		return
+	}
+	matchArray32, nextArray32, err := GetMatchArrayAndNext(rule32)
+	if err != nil {
+		return
+	}
+	searchIn := make(chan sSearchIn, 100)
+	searchOut := make(chan sSearchOut, 100)
+	initMultiThreadSearchMemoryBlock(threadNum, searchIn, searchOut)
+	go handleItemFromSearchOut(searchOut, evilResults)
 	for _, process := range processes {
 		// if the process is itslef, then skip
 		if os.Getpid() == process.Pid() {
@@ -316,39 +396,40 @@ func FindEvil(evilResults chan EvilResult) (err error) {
 			fmt.Printf("init process info error: %v\n", err)
 			continue
 		}
-		rule := rule32
+		nextArray := nextArray32
+		matchArray := matchArray32
 		if processScan.Is64Bit {
-			rule = rule64
+			nextArray = nextArray64
+			matchArray = matchArray64
 		}
-		var resultArray []MatchResult
-		err = processScan.SearchMemory(rule, &resultArray)
+		processScan.SearchMemory(matchArray, nextArray, process, searchIn)
+	}
+	close(searchIn)
+	return
+}
+
+func handleItemFromSearchOut(searchOut chan sSearchOut, evilResults chan EvilResult) {
+	for o := range searchOut {
+
+		configStart := uintptr(o.addr)
+		configBytes, err := win32.NtReadVirtualMemory(o.procScan.Handle, win32.PVOID(configStart), int64(o.procScan.pointerSize())*0x100)
 		if err != nil {
-			fmt.Printf("SearchMemory error: %v\n", err)
+			fmt.Printf("NtReadVirtualMemory error: %v", err)
 			continue
 		}
-		for i := range resultArray {
-			configStart := uintptr(resultArray[i].Addr)
-			configBytes, err := win32.NtReadVirtualMemory(processScan.Handle, win32.PVOID(configStart), int64(processScan.pointerSize())*0x100)
-			if err != nil {
-				fmt.Printf("NtReadVirtualMemory error: %v", err)
-				continue
-			}
-			extractor, err := NewConfigExtractor(configStart, configBytes, *processScan)
-			if err != nil {
-				fmt.Printf("NewConfigExtractor error: %v", err)
-				continue
-			}
-			evilResults <- EvilResult{
-				Pid:       process.Pid(),
-				Name:      process.Executable(),
-				Extractor: *extractor,
-				Address:   resultArray[i].Addr,
-			}
+		extractor, err := NewConfigExtractor(configStart, configBytes, *o.procScan)
+		if err != nil {
+			fmt.Printf("NewConfigExtractor error: %v", err)
+			continue
 		}
-		// searchEvil(handle, "4C 8B 53 08 45 8B 0A 45 8B 5A 04 4D 8D 52 08 45 85 C9 75 05 45 85 DB 74 33 45 3B CB 73 E6 49 8B F9 4C 8B 03", 0x410000, 0xFFFFFFFF, &evilResults, process, "x64-1")
-		// searchEvil(handle, "8B 46 04 8B 08 8B 50 04 83 C0 08 89 55 08 89 45 0C 85 C9 75 04 85 D2 74 23 3B CA 73 E6 8B 06 8D 3C 08 33 D2", 0x410000, 0xFFFFFFFF, &evilResults, process, "x86-2")
+		evilResults <- EvilResult{
+			Pid:       o.process.Pid(),
+			Name:      o.process.Executable(),
+			Extractor: *extractor,
+			Address:   uint64(o.addr),
+		}
 	}
-	return
+	close(evilResults)
 }
 
 func SearchMemoryBlock(hProcess win32.HANDLE, matchArray []uint16, startAddr uint64, size int64, next []int16, pResultArray *[]MatchResult) (err error) {
