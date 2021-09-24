@@ -10,6 +10,10 @@ download EvilEye in [releases](https://github.com/akkuman/EvilEye/releases)
 ./EvilEye.exe
 ```
 
+## Screenshot
+
+![](https://raw.githubusercontents.com/akkuman/pic/master/img/2021/09/bf0e1b48ba856c7b539cfcd5a58a738a.png)
+
 # Build
 
 ```shell
@@ -48,7 +52,7 @@ func main() {
 
 # TODO
 
-- Extraction configuration from memory
+- Extraction configuration from memory(portion done)
 
 
 # References
