@@ -33,7 +33,7 @@ func QueryMemoryInfo(hProcess HANDLE, lpAddress LPCVOID) (memInfo MemoryInfo, er
 
 func QueryAllMemoryInformation(hProcess HANDLE) (memInfos []MemoryInfo, err error) {
 	lpAddress := LPCVOID(0)
-	for lpAddress < math.MaxInt64 {
+	for lpAddress < math.MaxInt {
 		var memInfo MemoryInfo
 		var innerErr error
 		memInfo.MEMORY_BASIC_INFORMATION, innerErr = NtQueryVirtualMemory(hProcess, lpAddress)
